@@ -694,11 +694,16 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
     if (existsSync(skillMdPath)) {
       const content = readFileSync(skillMdPath, 'utf-8');
       const { metadata } = parseFrontmatter(content);
+      let safeStandaloneName: string | null = null;
       if (typeof metadata.name === 'string' && metadata.name.trim().length > 0) {
-        pluginSkillNames.add(toSafeStandaloneSkillName(metadata.name));
+        safeStandaloneName = toSafeStandaloneSkillName(metadata.name);
+        pluginSkillNames.add(safeStandaloneName);
       }
       // Store a simple content hash for safety comparison
       pluginSkillHashes.set(entry.name, content.trim());
+      if (safeStandaloneName !== null) {
+        pluginSkillHashes.set(safeStandaloneName, content.trim());
+      }
     }
   }
 
