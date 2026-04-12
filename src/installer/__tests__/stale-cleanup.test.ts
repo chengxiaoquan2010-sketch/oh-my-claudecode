@@ -295,14 +295,16 @@ describe('prunePluginDuplicateSkills', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('removes standalone skills that match plugin-provided skills', async () => {
+  it('removes standalone skills that match plugin-provided skills when marked as OMC-owned', async () => {
     vi.resetModules();
     const { prunePluginDuplicateSkills: prune, SKILLS_DIR: skillsDir } = await import('../index.js');
 
     mkdirSync(skillsDir, { recursive: true });
 
     // Create a standalone copy of 'ralph' (which the plugin also provides)
+    // and mark it as OMC-owned — this is what a prior `omc setup` would have done
     createSkillDir(skillsDir, 'ralph', 'ralph');
+    createManagedSkillMarker(skillsDir, 'ralph');
 
     const removed = prune(log);
 
@@ -323,6 +325,66 @@ describe('prunePluginDuplicateSkills', () => {
 
     expect(removed).not.toContain('ralph');
     expect(existsSync(join(skillsDir, 'ralph'))).toBe(true);
+  });
+
+  it('preserves user skills with standard frontmatter that have different content from plugin version (issue #2573)', async () => {
+    // Regression: the old `isOmcCreated` heuristic treated any skill with
+    // `---\nname:` frontmatter as OMC-owned and deleted it during update,
+    // even when the content differed from the plugin's copy.
+    vi.resetModules();
+    const { prunePluginDuplicateSkills: prune, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    // User's custom version of 'ralph' — standard frontmatter, but unique body
+    const customSkillDir = join(skillsDir, 'ralph');
+    mkdirSync(customSkillDir, { recursive: true });
+    writeFileSync(
+      join(customSkillDir, 'SKILL.md'),
+      '---\nname: ralph\ndescription: My custom ralph workflow\n---\n\n# My Custom Ralph\nThis is my personalized version.\n',
+    );
+    // No .omc-managed marker — this is user-owned
+
+    const removed = prune(log);
+
+    expect(removed).not.toContain('ralph');
+    expect(existsSync(join(skillsDir, 'ralph'))).toBe(true);
+  });
+
+  it('removes exact-match standalone alias duplicates like omc-plan while preserving alias lookup behavior', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateSkills: prune, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    const packagePlanSkill = readFileSync(join(process.cwd(), 'skills', 'plan', 'SKILL.md'), 'utf-8');
+    const aliasSkillDir = join(skillsDir, 'omc-plan');
+    mkdirSync(aliasSkillDir, { recursive: true });
+    writeFileSync(join(aliasSkillDir, 'SKILL.md'), packagePlanSkill);
+
+    const removed = prune(log);
+
+    expect(removed).toContain('omc-plan');
+    expect(existsSync(aliasSkillDir)).toBe(false);
+  });
+
+  it('preserves user-authored standalone alias skills like omc-plan when content differs from plugin copy', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateSkills: prune, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    const aliasSkillDir = join(skillsDir, 'omc-plan');
+    mkdirSync(aliasSkillDir, { recursive: true });
+    writeFileSync(
+      join(aliasSkillDir, 'SKILL.md'),
+      '---\nname: plan\ndescription: My custom alias skill\n---\n\n# Custom omc-plan\nUser-authored content.\n',
+    );
+
+    const removed = prune(log);
+
+    expect(removed).not.toContain('omc-plan');
+    expect(existsSync(aliasSkillDir)).toBe(true);
   });
 
   it('preserves omc-learned directory', async () => {
@@ -362,6 +424,7 @@ describe('prunePluginDuplicateSkills', () => {
 
     mkdirSync(skillsDir, { recursive: true });
     createSkillDir(skillsDir, 'ralph', 'ralph');
+    createManagedSkillMarker(skillsDir, 'ralph');
 
     const first = prune(log);
     expect(first).toContain('ralph');
